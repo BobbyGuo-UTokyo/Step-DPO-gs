@@ -41,7 +41,8 @@ def is_correct(item, pred_key='prediction', prec=1e-3):
             # if ans == "0.5":
             #     import pdb; pdb.set_trace()
 
-            label = label or (ans and pred == ans) or math_equal(pred, ans)
+            # label = label or (ans and pred == ans) or math_equal(pred, ans)
+            label = label or (ans and pred == ans) or (ans and pred.lower() == ans.lower()) or math_equal(pred, ans)
             return label
     else:
         print(item, flush=True)

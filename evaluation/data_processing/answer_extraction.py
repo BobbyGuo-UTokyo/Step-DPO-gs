@@ -250,6 +250,35 @@ def extract_answer(pred_str, exhaust=False):
     else:
         return _pred[-1] if _pred else ""
 
+def extract_vllm_gt_answer(reasoning, task):
+    # "Answer: C. Rabbit"
+    if task in ("ai2d", "aokvqa", "gllava_qa", "mathvision", "sqa"):
+        gt_answer = reasoning.split("Answer:")[-1].strip().split(".")[0].strip()
+    # Answer: [Switzerland, Spain]
+    elif task in ("chartqa", "docvqa", "infovqa", "sa_gllava_qa", "textvqa"):
+        gt_answer = reasoning.split("Answer:")[-1].strip()
+    else:
+        raise ValueError(f"Task {task} is not supported")
+    return gt_answer
+
+def extract_vllm_model_answer(reasoning, task):
+    # Ignore answers not following format
+    if "nswer:" not in reasoning:
+        return []
+    answer = reasoning.split("nswer:")[-1].strip()
+    if task in ("ai2d", "aokvqa", "gllava_qa", "mathvision", "sqa"):
+        if "." in answer:
+            answer = answer.split(".")[0].strip()
+    # Answer: [Switzerland, Spain]
+    elif task in ("chartqa", "docvqa", "infovqa", "sa_gllava_qa", "textvqa"):
+        pass
+    else:
+        raise ValueError(f"Task {task} is not supported")
+    answer = answer.strip()
+    answer = answer.rstrip(".")
+    answer = answer.rstrip("/")
+    return [answer]
+
 def extract_math_answer(question, reasoning, task):
     answer = []
     for ans in extract_answer(reasoning, exhaust=True):
