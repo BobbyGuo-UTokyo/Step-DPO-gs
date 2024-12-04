@@ -8,25 +8,41 @@ import io
 import base64
 
 from evaluation.eval.eval_script import eval_math 
-from evaluation.data_processing.answer_extraction import extract_vllm_gt_answer, extract_vllm_model_answer
+from evaluation.data_processing.answer_extraction import extract_vllm_gt_answer, extract_vllm_gt_tag_answer, extract_vllm_model_answer, extract_vllm_model_tag_answer
 
 from vllm import LLM, SamplingParams
 import torch
 import sys
 MAX_INT = sys.maxsize
 INVALID_ANS = "[invalid]"
+# VALID_DATASETS = (
+#     "ai2d",
+#     "aokvqa",
+#     "chartqa",
+#     "docvqa",
+#     "infovqa",
+#     # "gllava-align", # open answer
+#     "sa_gllava_qa",
+#     "gllava_qa",
+#     "mathvision",
+#     "sqa",
+#     "textvqa"
+# )
+
+# For LLaVA-CoT-100k
 VALID_DATASETS = (
+    "coco",
     "ai2d",
-    "aokvqa",
+    "vg",
+    "geoqa+",
+    "textvqa",
     "chartqa",
-    "docvqa",
-    "infovqa",
-    # "gllava-align", # open answer
-    "sa_gllava_qa",
-    "gllava_qa",
-    "mathvision",
     "sqa",
-    "textvqa"
+    "docvqa",
+    "gqa",
+    "ocr_vqa",
+    "CLEVR_v1.0",
+    "web-landmark"
 )
 
 def encode_image(image_path):
@@ -97,14 +113,16 @@ def test_vllm(model, data_path, image_root=None, remainder=0, n_groups=MAX_INT, 
     elif args.prompt == 'qwen2-vl-step':
         problem_prompt = (
             "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
-            "<|im_start|>user\n<image>\nAnswer the following question with information observed in the given image.\n"
+            "<|im_start|>user\n<image>\nYou are given a question to be answered together with information in the given image.\n"
             "{instruction}\n"
-            # "If you are asked to give a short answer, just give a short answer as your final answer. "
-            # "If you are asked to give a letter or a number, just give a letter or a number as your final answer. "
-            # "Your answer must be strictly based on information from the image. If you cannot find the answer with given information, just give \"I don\'t know\" as your final answer. "
-            "In your final answer, just include a short answer like a number, a letter, or a few words.\n"
-            "Please reason step by step, and give your final answer after \"Answer: \".<|im_end|>\n"
-            "<|im_start|>assistant\nLet's think step by step.\nStep 1: "
+            "Your answer should strictly follow the four specific stages, question summary stage, image caption stage, reasoning steps stage, conclusion stage.\n"
+            "In question summary stage, you must summarize what the problem is and what steps you may have to take to solve the problem, and the summary should be placed inside <SUMMARY> and </SUMMARY>.\n"
+            "In image caption stage, describe the contents of the image, specifically focusing on details relevant to the question, and the caption should be placed inside <CAPTION> and </CAPTION>.\n"
+            "In reasoning steps stage, outline a step-by-step thought process you would use to solve the problem based on the image. Please reason step by step, and place your reasoning steps inside <STEP_1> and </STEP_1>, <STEP_2> and </STEP_2>, and so on.\n"
+            "In final conclusion stage, you must give a short direct answer like a number, a letter, or a few words. If it's a multiple choice question, the conclusion should only include the letter for the option without repeating what the option is. Place the final answer inside <CONCLUSION> and </CONCLUSION>.<|im_end|>\n"
+            "<|im_start|>assistant\n<SUMMARY>"
+            # "<|im_start|>user\nI have an image and a question that I want you to answer. I need you to strictly follow the format with four specific sections: SUMMARY, CAPTION, reasoning steps, and CONCLUSION. It is crucial that you adhere to this structure exactly as outlined and that the final answer in the CONCLUSION is brief and concise. To explain further: In SUMMARY, briefly explain what steps you'll take to solve the problem. In CAPTION, describe the contents of the image, specifically focusing on details relevant to the question. In reasoning steps, outline a step-by-step thought process you would use to solve the problem based on the image, and wrap in <Step_1> and </Step_1>, <Step_2> and </Step_2>, etc.. In CONCLUSION, give the final answer in a direct brief format. If it's a multiple choice question, the conclusion should only include the option without repeating what the option is. Here is an example on how the format should look like:\n<SUMMARY> [Summarize how you will approach the problem and explain the steps you will take to reach the answer.] </SUMMARY>\n<CAPTION> [Provide a detailed description of the image, particularly emphasizing the aspects related to the question.] </CAPTION>\n<Step_1> [Provide the first step of a chain-of-thought, logical explanation of the problem.] </Step_1>\n<Step_2> [Provide the second step of a chain-of-thought, logical explanation of the problem.] </Step_2>\n<CONCLUSION> [State the final answer in a clear and direct format. It must match the correct answer exactly.] </CONCLUSION> (Do not forget </CONCLUSION>!) Please apply this format meticulously to analyze the given image and answer the related question.<|im_end|>\n"
+            # "<|im_start|>assistant\n<SUMMARY>"
         )
     elif args.prompt == 'qwen2-boxed-prefix':
         problem_prompt = (
@@ -118,7 +136,7 @@ def test_vllm(model, data_path, image_root=None, remainder=0, n_groups=MAX_INT, 
         for idx, item in enumerate(jsonlines.Reader(f)):
             # Filter dataset
             try:
-                dataset_name = [name for name in VALID_DATASETS if name in item["id"]][0]
+                dataset_name = [name for name in VALID_DATASETS if name in item["image"]][0]
             except:
                 continue
             # Get image path
@@ -129,7 +147,8 @@ def test_vllm(model, data_path, image_root=None, remainder=0, n_groups=MAX_INT, 
             if image_root is not None:
                 image_path = os.path.join(image_root, image_path)
             question = item["conversations"][0]["value"]
-            item["answer"] = extract_vllm_gt_answer(item["conversations"][1]["value"], task=dataset_name)
+            # item["answer"] = extract_vllm_gt_answer(item["conversations"][1]["value"], task=dataset_name)
+            item["answer"] = extract_vllm_gt_tag_answer(item["conversations"][1]["value"])
             if "prefix" in item:
                 temp_instr = problem_prompt.format(instruction=question, prefix=item['prefix'])
             else:
@@ -178,22 +197,28 @@ def test_vllm(model, data_path, image_root=None, remainder=0, n_groups=MAX_INT, 
 
         res_completions = []
         for idx, prompts in enumerate(batch_vllm_ins):
-            assert isinstance(prompts, list)
-            all_messages = []
-            for prompt in prompts:
-                base64_image, image_extention = encode_image(prompt["image_path"])
-                messages = [{
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/{image_extention};base64,{base64_image}"}},
-                        {"type": "text", "text": prompt["prompt"]}
-                    ]
-                }]
-                all_messages.append(messages) # batch
-            completions = llm.chat(all_messages, sampling_params=sampling_params, use_tqdm=True)
-            for output in completions:
-                generated_text = output.outputs[0].text
-                res_completions.append(generated_text)
+            try:
+                assert isinstance(prompts, list)
+                all_messages = []
+                for prompt in prompts:
+                    base64_image, image_extention = encode_image(prompt["image_path"])
+                    messages = [{
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": f"data:image/{image_extention};base64,{base64_image}"}},
+                            {"type": "text", "text": prompt["prompt"]}
+                        ]
+                    }]
+                    all_messages.append(messages) # batch
+                completions = llm.chat(all_messages, sampling_params=sampling_params, use_tqdm=True)
+                for output in completions:
+                    generated_text = output.outputs[0].text
+                    res_completions.append(generated_text)
+            except Exception as e:
+                print(f"Error {e}, skip {idx}")
+                for prompt in prompts:
+                    res_completions.append("") # dummy invalid output
+                continue
     else:
         res_completions = []
         with open(save_path) as f:
@@ -216,7 +241,7 @@ def test_vllm(model, data_path, image_root=None, remainder=0, n_groups=MAX_INT, 
             'question': prompt,
             'model_output': completion,
             'image_path': attribute['image_path'],
-            'prediction': extract_vllm_model_answer(completion, task=attribute["task"]),
+            'prediction': extract_vllm_model_tag_answer(completion, task=attribute["task"]),
             'answer': prompt_answer if isinstance(prompt_answer, list) else [prompt_answer],
         }
 

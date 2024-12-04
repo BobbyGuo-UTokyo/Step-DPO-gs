@@ -2,3 +2,5 @@
 wandb/
 outputs/
 dataset/
+data_pipeline/generated
+data_pipeline/predictions

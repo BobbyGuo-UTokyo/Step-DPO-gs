@@ -261,6 +261,11 @@ def extract_vllm_gt_answer(reasoning, task):
         raise ValueError(f"Task {task} is not supported")
     return gt_answer
 
+def extract_vllm_gt_tag_answer(reasoning):
+    # LLaVA-CoT-100k
+    gt_answer = reasoning.split("<CONCLUSION>")[-1].split("</CONCLUSION>")[0].strip()
+    return gt_answer
+
 def extract_vllm_model_answer(reasoning, task):
     # Ignore answers not following format
     if "nswer:" not in reasoning:
@@ -277,6 +282,25 @@ def extract_vllm_model_answer(reasoning, task):
     answer = answer.strip()
     answer = answer.rstrip(".")
     answer = answer.rstrip("/")
+    return [answer]
+
+def extract_vllm_model_tag_answer(reasoning, task):
+    # Ignore answers not following format
+    if "<CONCLUSION>" not in reasoning:
+        return []
+    answer = reasoning.split("<CONCLUSION>")[-1].split("</CONCLUSION>")[0].strip()
+    # # Answer: B. Fish, extract letter
+    # if task in ("ai2d", "aokvqa", "gllava_qa", "mathvision", "sqa"):
+    #     if "." in answer:
+    #         answer = answer.split(".")[0].strip()
+    # # Answer: [Switzerland, Spain], keep original answer
+    # elif task in ("chartqa", "docvqa", "infovqa", "sa_gllava_qa", "textvqa"):
+    #     pass
+    # else:
+    #     raise ValueError(f"Task {task} is not supported")
+    # answer = answer.strip()
+    # answer = answer.rstrip(".")
+    # answer = answer.rstrip("/")
     return [answer]
 
 def extract_math_answer(question, reasoning, task):
